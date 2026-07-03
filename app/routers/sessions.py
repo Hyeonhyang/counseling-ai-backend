@@ -1,0 +1,164 @@
+import json
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from sqlalchemy.orm import Session as DBSession
+
+from app.database import get_db
+from app.models import Session
+from app.schemas import SessionCreate, SessionResponse, SessionUpdateScores, AIParseResult
+from app.ai_parser import parse_counseling_text, generate_comparison_insight
+
+router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+
+
+@router.get("/client/{client_id}", response_model=list[SessionResponse])
+def get_sessions_by_client(client_id: int, db: DBSession = Depends(get_db)):
+    return db.query(Session).filter(
+        Session.client_id == client_id
+    ).order_by(Session.session_number).all()
+
+
+@router.post("", response_model=SessionResponse)
+def create_session(data: SessionCreate, db: DBSession = Depends(get_db)):
+    session = Session(
+        client_id=data.client_id,
+        session_number=data.session_number,
+        raw_text=data.raw_text,
+        technique_used=data.technique_used,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@router.post("/upload")
+async def upload_session_file(
+    client_id: int = Form(...),
+    session_number: int = Form(...),
+    technique_used: str = Form(""),
+    file: UploadFile = File(...)
+):
+    """텍스트 파일 업로드로 세션 생성"""
+    content = await file.read()
+    text = content.decode("utf-8")
+    return {"raw_text": text, "client_id": client_id, "session_number": session_number}
+
+
+@router.post("/parse-text", response_model=AIParseResult)
+def parse_text_only(data: dict):
+    """텍스트만 AI 분석 (DB 저장 없이)"""
+    text = data.get("text", "")
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Text is empty")
+
+    result = parse_counseling_text(text)
+
+    return AIParseResult(
+        depression_score=result["depression_score"],
+        anxiety_score=result["anxiety_score"],
+        anger_score=result["anger_score"],
+        self_esteem_score=result["self_esteem_score"],
+        key_persons=result.get("key_persons", []),
+        defense_mechanisms=result.get("defense_mechanisms", []),
+        summary=result.get("summary", ""),
+    )
+
+
+@router.post("/{session_id}/parse", response_model=AIParseResult)
+def parse_session(session_id: int, db: DBSession = Depends(get_db)):
+    """AI로 세션 텍스트 분석"""
+    session = db.query(Session).filter(Session.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    result = parse_counseling_text(session.raw_text)
+
+    return AIParseResult(
+        depression_score=result["depression_score"],
+        anxiety_score=result["anxiety_score"],
+        anger_score=result["anger_score"],
+        self_esteem_score=result["self_esteem_score"],
+        key_persons=result.get("key_persons", []),
+        defense_mechanisms=result.get("defense_mechanisms", []),
+        summary=result.get("summary", ""),
+    )
+
+
+@router.patch("/{session_id}/scores", response_model=SessionResponse)
+def update_scores(session_id: int, data: SessionUpdateScores, db: DBSession = Depends(get_db)):
+    """AI 분석 결과 확정 (수동 보정 후 저장)"""
+    session = db.query(Session).filter(Session.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session.depression_score = data.depression_score
+    session.anxiety_score = data.anxiety_score
+    session.anger_score = data.anger_score
+    session.self_esteem_score = data.self_esteem_score
+    session.key_persons = data.key_persons
+    session.defense_mechanisms = data.defense_mechanisms
+    if data.ai_summary:
+        session.ai_summary = data.ai_summary
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@router.delete("/{session_id}")
+def delete_session(session_id: int, db: DBSession = Depends(get_db)):
+    """세션 삭제"""
+    session = db.query(Session).filter(Session.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    db.delete(session)
+    db.commit()
+    return {"success": True}
+
+
+@router.put("/{session_id}", response_model=SessionResponse)
+def update_session(session_id: int, data: SessionCreate, db: DBSession = Depends(get_db)):
+    """세션 내용 수정 (텍스트, 회차, 기법 등)"""
+    session = db.query(Session).filter(Session.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session.raw_text = data.raw_text
+    session.session_number = data.session_number
+    session.technique_used = data.technique_used
+    db.commit()
+    db.refresh(session)
+    return session
+
+
+@router.get("/compare")
+def compare_sessions(client_id: int, session_numbers: str, db: DBSession = Depends(get_db)):
+    """다중 세션 비교 + AI 인사이트"""
+    nums = [int(n.strip()) for n in session_numbers.split(",")]
+
+    sessions = db.query(Session).filter(
+        Session.client_id == client_id,
+        Session.session_number.in_(nums)
+    ).order_by(Session.session_number).all()
+
+    if not sessions:
+        raise HTTPException(status_code=404, detail="No sessions found")
+
+    sessions_data = [
+        {
+            "session_number": s.session_number,
+            "depression": s.depression_score,
+            "anxiety": s.anxiety_score,
+            "anger": s.anger_score,
+            "self_esteem": s.self_esteem_score,
+            "key_persons": json.loads(s.key_persons) if s.key_persons else [],
+            "technique": s.technique_used,
+            "summary": s.ai_summary,
+        }
+        for s in sessions
+    ]
+
+    insight = generate_comparison_insight(sessions_data)
+
+    return {
+        "sessions": sessions_data,
+        "insight": insight,
+    }
