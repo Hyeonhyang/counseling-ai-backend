@@ -80,6 +80,21 @@ def generate_soap(data: dict):
     return generate_soap_note(text)
 
 
+@router.post("/test-risk")
+def test_risk(data: dict):
+    """위기 감지 테스트용"""
+    text = data.get("text", "")
+    from app.ai_parser import detect_risk_level, CRISIS_KEYWORDS_DIRECT, WARNING_KEYWORDS
+    result = detect_risk_level(text)
+    # 디버그: 키워드 몇개와 텍스트 일부 반환
+    return {
+        "input_text_first_50": text[:50],
+        "result": result,
+        "crisis_keywords_sample": CRISIS_KEYWORDS_DIRECT[:3],
+        "check_contains": "죽고 싶" in text,
+    }
+
+
 @router.post("/transcribe")
 async def transcribe_audio(file: UploadFile = File(...)):
     """음성 파일을 텍스트로 변환 (Groq Whisper)"""
