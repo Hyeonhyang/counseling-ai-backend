@@ -96,24 +96,5 @@ def get_recommendation(client_id: int, db: DBSession = Depends(get_db)):
 
 @router.post("/index-all")
 def index_all_sessions(db: DBSession = Depends(get_db)):
-    """기존 모든 세션을 ChromaDB에 인덱싱 (1회 실행)"""
-    from app.vector_store import upsert_session
-
-    sessions = db.query(Session).filter(Session.depression_score > 0).all()
-    count = 0
-    for s in sessions:
-        upsert_session(s.id, s.client_id, {
-            "session_number": s.session_number,
-            "depression_score": s.depression_score,
-            "anxiety_score": s.anxiety_score,
-            "anger_score": s.anger_score,
-            "self_esteem_score": s.self_esteem_score,
-            "technique_used": s.technique_used or "",
-            "key_persons": s.key_persons or "[]",
-            "defense_mechanisms": s.defense_mechanisms or "[]",
-            "ai_summary": s.ai_summary or "",
-            "raw_text": s.raw_text[:500] if s.raw_text else "",
-        })
-        count += 1
-
-    return {"indexed": count, "total_in_vector_db": get_collection_count()}
+    """벡터 검색 상태 확인 (PostgreSQL 기반이므로 별도 인덱싱 불필요)"""
+    return {"status": "ok", "message": "PostgreSQL 기반 검색 - 별도 인덱싱 불필요", "total_searchable": get_collection_count()}

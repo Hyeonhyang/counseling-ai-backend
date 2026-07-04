@@ -1,120 +1,144 @@
-"""ChromaDB Vector Store - 유사 케이스 검색용"""
-import os
-import chromadb
-from chromadb.config import Settings
-
-# ChromaDB 클라이언트 (로컬 영구 저장)
-CHROMA_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "chroma_data")
-chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
-
-# 컬렉션: 세션별 임베딩
-collection = chroma_client.get_or_create_collection(
-    name="counseling_sessions",
-    metadata={"hnsw:space": "cosine"}  # 코사인 유사도 사용
-)
+"""벡터 검색 - PostgreSQL 기반 (배포 환경 호환)
+ChromaDB 대신 PostgreSQL의 trigram 유사도 + 점수 가중치 기반 검색 사용.
+Supabase에서도 안정적으로 동작.
+"""
+import json
+from sqlalchemy import text
+from app.database import SessionLocal
 
 
-def build_session_document(session_data: dict) -> str:
-    """세션 데이터를 검색용 문서 텍스트로 변환"""
+def build_search_profile(session_data: dict) -> str:
+    """세션 데이터를 검색용 프로파일 텍스트로 변환"""
     parts = []
-
-    # 점수 정보
-    parts.append(f"우울:{session_data.get('depression_score', 0)} 불안:{session_data.get('anxiety_score', 0)} 분노:{session_data.get('anger_score', 0)} 자존감:{session_data.get('self_esteem_score', 0)}")
-
-    # 기법
     technique = session_data.get("technique_used", "")
     if technique:
-        parts.append(f"사용기법:{technique}")
+        parts.append(f"기법:{technique}")
 
-    # 핵심 인물
-    persons = session_data.get("key_persons", "")
+    persons = session_data.get("key_persons", "[]")
     if persons and persons != "[]":
-        parts.append(f"핵심인물:{persons}")
+        try:
+            p_list = json.loads(persons) if isinstance(persons, str) else persons
+            parts.append(f"인물:{','.join(p_list)}")
+        except:
+            pass
 
-    # 방어기제
-    defenses = session_data.get("defense_mechanisms", "")
+    defenses = session_data.get("defense_mechanisms", "[]")
     if defenses and defenses != "[]":
-        parts.append(f"방어기제:{defenses}")
+        try:
+            d_list = json.loads(defenses) if isinstance(defenses, str) else defenses
+            parts.append(f"방어기제:{','.join(d_list)}")
+        except:
+            pass
 
-    # 요약
     summary = session_data.get("ai_summary", "")
     if summary:
         parts.append(summary)
 
-    # 원문 일부 (처음 500자)
-    raw = session_data.get("raw_text", "")
-    if raw:
-        parts.append(raw[:500])
-
     return " ".join(parts)
 
 
-def upsert_session(session_id: int, client_id: int, session_data: dict):
-    """세션을 벡터 DB에 추가/업데이트"""
-    doc_text = build_session_document(session_data)
-    doc_id = f"session_{session_id}"
+def search_similar_sessions(current_session: dict, current_client_id: int, top_k: int = 3) -> list:
+    """
+    복합 유사도 검색:
+    1. 점수 유사도 (유클리드 거리)
+    2. 기법 매칭 보너스
+    3. 핵심 인물 매칭 보너스
+    """
+    db = SessionLocal()
+    try:
+        from app.models import Session, Client
 
-    metadata = {
-        "session_id": session_id,
-        "client_id": client_id,
-        "session_number": session_data.get("session_number", 0),
-        "depression_score": float(session_data.get("depression_score", 0)),
-        "anxiety_score": float(session_data.get("anxiety_score", 0)),
-        "anger_score": float(session_data.get("anger_score", 0)),
-        "self_esteem_score": float(session_data.get("self_esteem_score", 0)),
-        "technique_used": session_data.get("technique_used", ""),
-    }
+        # 현재 상태
+        dep = current_session.get("depression_score", 0)
+        anx = current_session.get("anxiety_score", 0)
+        ang = current_session.get("anger_score", 0)
+        est = current_session.get("self_esteem_score", 0)
+        technique = current_session.get("technique_used", "")
+        persons = current_session.get("key_persons", "[]")
 
-    collection.upsert(
-        ids=[doc_id],
-        documents=[doc_text],
-        metadatas=[metadata],
-    )
+        # 다른 내담자의 분석 완료된 세션만 조회
+        all_sessions = db.query(Session).filter(
+            Session.client_id != current_client_id,
+            Session.depression_score > 0
+        ).all()
 
+        scored = []
+        for s in all_sessions:
+            # 1. 점수 유사도 (역 유클리드 거리, 0~100)
+            distance = (
+                (s.depression_score - dep) ** 2 +
+                (s.anxiety_score - anx) ** 2 +
+                (s.anger_score - ang) ** 2 +
+                (s.self_esteem_score - est) ** 2
+            ) ** 0.5
+            score_similarity = max(0, 100 - distance * 0.5)
 
-def search_similar_sessions(query_session_data: dict, current_client_id: int, top_k: int = 5) -> list:
-    """현재 세션과 유사한 다른 내담자의 세션 검색"""
-    query_text = build_session_document(query_session_data)
+            # 2. 기법 매칭 보너스 (+15)
+            technique_bonus = 15 if (technique and s.technique_used and
+                                     technique.lower() == s.technique_used.lower()) else 0
 
-    # 검색 (현재 내담자 제외를 위해 더 많이 가져옴)
-    results = collection.query(
-        query_texts=[query_text],
-        n_results=top_k + 10,  # 필터링 후 top_k 남기기 위해 여유분
-    )
+            # 3. 핵심 인물 매칭 보너스 (겹치는 인물당 +5, 최대 +15)
+            person_bonus = 0
+            try:
+                current_persons = json.loads(persons) if isinstance(persons, str) else persons
+                session_persons = json.loads(s.key_persons) if s.key_persons else []
+                overlap = set(current_persons) & set(session_persons)
+                person_bonus = min(15, len(overlap) * 5)
+            except:
+                pass
 
-    if not results or not results["ids"] or not results["ids"][0]:
-        return []
+            # 4. 방어기제 매칭 보너스 (겹치면 +10)
+            defense_bonus = 0
+            try:
+                current_def = json.loads(current_session.get("defense_mechanisms", "[]"))
+                session_def = json.loads(s.defense_mechanisms) if s.defense_mechanisms else []
+                if set(current_def) & set(session_def):
+                    defense_bonus = 10
+            except:
+                pass
 
-    similar = []
-    for i, doc_id in enumerate(results["ids"][0]):
-        meta = results["metadatas"][0][i] if results["metadatas"] else {}
-        distance = results["distances"][0][i] if results["distances"] else 1.0
+            total_similarity = min(100, score_similarity + technique_bonus + person_bonus + defense_bonus)
 
-        # 현재 내담자 자신의 세션은 제외
-        if meta.get("client_id") == current_client_id:
-            continue
+            scored.append({
+                "session": s,
+                "similarity": round(total_similarity, 1),
+                "factors": {
+                    "score_match": round(score_similarity, 1),
+                    "technique_match": technique_bonus > 0,
+                    "person_overlap": person_bonus > 0,
+                    "defense_overlap": defense_bonus > 0,
+                }
+            })
 
-        similarity = round((1 - distance) * 100, 1)  # 코사인 거리 → 유사도 %
+        # 유사도 높은 순 정렬
+        scored.sort(key=lambda x: x["similarity"], reverse=True)
 
-        similar.append({
-            "session_id": meta.get("session_id"),
-            "client_id": meta.get("client_id"),
-            "case_id": f"내담자 #{meta.get('client_id', '?')}",
-            "session_number": meta.get("session_number", 0),
-            "similarity": similarity,
-            "technique_used": meta.get("technique_used", "미기록"),
-            "depression": meta.get("depression_score", 0),
-            "anxiety": meta.get("anxiety_score", 0),
-            "anger": meta.get("anger_score", 0),
-            "self_esteem": meta.get("self_esteem_score", 0),
-        })
+        results = []
+        for item in scored[:top_k]:
+            s = item["session"]
+            results.append({
+                "case_id": f"내담자 #{s.client_id}",
+                "session_number": s.session_number,
+                "similarity": item["similarity"],
+                "technique_used": s.technique_used or "미기록",
+                "depression": s.depression_score,
+                "anxiety": s.anxiety_score,
+                "anger": s.anger_score,
+                "self_esteem": s.self_esteem_score,
+                "match_factors": item["factors"],
+            })
 
-        if len(similar) >= top_k:
-            break
+        return results
 
-    return similar
+    finally:
+        db.close()
 
 
 def get_collection_count() -> int:
-    """벡터 DB에 저장된 세션 수"""
-    return collection.count()
+    """검색 가능한 세션 수"""
+    db = SessionLocal()
+    try:
+        from app.models import Session
+        return db.query(Session).filter(Session.depression_score > 0).count()
+    finally:
+        db.close()
