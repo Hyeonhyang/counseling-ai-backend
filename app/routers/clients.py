@@ -9,7 +9,7 @@ from app.auth import get_current_counselor_id
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 
 
-@router.get("", response_model=list[ClientResponse])
+@router.get("")
 def list_clients(search: str = "", counselor_id: int = Depends(get_current_counselor_id), db: DBSession = Depends(get_db)):
     """내 내담자 목록만 조회 + 최신 위기 레벨"""
     query = db.query(Client).filter(Client.counselor_id == counselor_id)
