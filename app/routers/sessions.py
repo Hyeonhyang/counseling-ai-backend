@@ -157,6 +157,25 @@ def update_scores(session_id: int, data: SessionUpdateScores, db: DBSession = De
         session.risk_keywords = data.risk_keywords
     db.commit()
     db.refresh(session)
+
+    # 벡터 DB에도 업데이트
+    try:
+        from app.vector_store import upsert_session
+        upsert_session(session.id, session.client_id, {
+            "session_number": session.session_number,
+            "depression_score": session.depression_score,
+            "anxiety_score": session.anxiety_score,
+            "anger_score": session.anger_score,
+            "self_esteem_score": session.self_esteem_score,
+            "technique_used": session.technique_used or "",
+            "key_persons": session.key_persons or "[]",
+            "defense_mechanisms": session.defense_mechanisms or "[]",
+            "ai_summary": session.ai_summary or "",
+            "raw_text": session.raw_text[:500] if session.raw_text else "",
+        })
+    except Exception as e:
+        print(f"Vector DB upsert error: {e}")
+
     return session
 
 
