@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session as DBSession
 from app.database import get_db
 from app.models import Session
 from app.schemas import SessionCreate, SessionResponse, SessionUpdateScores, AIParseResult
-from app.ai_parser import parse_counseling_text, generate_comparison_insight
+from app.ai_parser import parse_counseling_text, generate_comparison_insight, detect_risk_level
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -44,24 +44,27 @@ async def upload_session_file(
     return {"raw_text": text, "client_id": client_id, "session_number": session_number}
 
 
-@router.post("/parse-text", response_model=AIParseResult)
+@router.post("/parse-text")
 def parse_text_only(data: dict):
-    """텍스트만 AI 분석 (DB 저장 없이)"""
+    """텍스트만 AI 분석 (DB 저장 없이) + 위기 감지"""
     text = data.get("text", "")
     if not text.strip():
         raise HTTPException(status_code=400, detail="Text is empty")
 
     result = parse_counseling_text(text)
+    risk = detect_risk_level(text)
 
-    return AIParseResult(
-        depression_score=result["depression_score"],
-        anxiety_score=result["anxiety_score"],
-        anger_score=result["anger_score"],
-        self_esteem_score=result["self_esteem_score"],
-        key_persons=result.get("key_persons", []),
-        defense_mechanisms=result.get("defense_mechanisms", []),
-        summary=result.get("summary", ""),
-    )
+    return {
+        "depression_score": result["depression_score"],
+        "anxiety_score": result["anxiety_score"],
+        "anger_score": result["anger_score"],
+        "self_esteem_score": result["self_esteem_score"],
+        "key_persons": result.get("key_persons", []),
+        "defense_mechanisms": result.get("defense_mechanisms", []),
+        "summary": result.get("summary", ""),
+        "risk_level": risk["level"],
+        "risk_keywords": risk["keywords"],
+    }
 
 
 @router.post("/soap")
@@ -117,6 +120,10 @@ def update_scores(session_id: int, data: SessionUpdateScores, db: DBSession = De
         session.soap_assessment = data.soap_assessment
     if data.soap_plan:
         session.soap_plan = data.soap_plan
+    if data.risk_level:
+        session.risk_level = data.risk_level
+    if data.risk_keywords:
+        session.risk_keywords = data.risk_keywords
     db.commit()
     db.refresh(session)
     return session

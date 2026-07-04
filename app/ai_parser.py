@@ -98,6 +98,109 @@ def generate_comparison_insight(sessions_data: list) -> str:
         return "AI 인사이트를 생성할 수 없습니다."
 
 
+# ========== 위기 키워드 감지 (2-Step Filter) ==========
+
+# 1단계: 주의 레벨 (Warning) 키워드
+WARNING_KEYWORDS = [
+    "사라지고 싶", "의미 없", "소용없", "포기하고 싶", "끝내고 싶", "지쳐", "다 내려놓",
+    "아무도 없", "혼자", "버려진", "방에서 안 나", "연락 끊",
+    "내 잘못", "나 때문", "민폐", "쓸모없", "한심", "태어나지 말았",
+    "사라지면", "없어지면", "살기 싫", "힘들어서 못",
+]
+
+# 2단계: 위기 레벨 (Crisis) 직접 키워드
+CRISIS_KEYWORDS_DIRECT = [
+    "죽고 싶", "죽어야", "자해", "손목 긋", "번개탄", "음독", "수면제 모",
+    "뛰어내리", "유서", "목 매", "목매", "죽을 거", "죽겠",
+    "죽여버리", "칼로 찌르", "불 지르", "보복", "가만 안 두",
+    "죽을래", "안 깨어나", "영원히 잠",
+]
+
+# 2단계: 위기 레벨 복합 문맥 키워드 (두 조건 동시 충족 필요)
+CRISIS_CONTEXT_PAIRS = [
+    (["정리", "신변", "재산"], ["물건", "주변", "다 끝", "다 정리"]),
+    (["마지막", "그동안"], ["인사", "고마웠", "잘 지내", "안녕"]),
+    (["아끼던", "나의 것", "내 물건"], ["주다", "나눠주", "버리"]),
+]
+
+
+def detect_risk_level(text: str) -> dict:
+    """
+    2-Step 위기 키워드 감지
+    Returns: {"level": "none"|"warning"|"crisis", "keywords": [...], "requires_llm_check": bool}
+    """
+    detected_keywords = []
+    level = "none"
+    requires_llm = False
+
+    # Step 1: Crisis 직접 키워드 검사 (가장 높은 우선순위)
+    for keyword in CRISIS_KEYWORDS_DIRECT:
+        if keyword in text:
+            detected_keywords.append(keyword)
+            level = "crisis"
+
+    # Crisis 복합 문맥 검사
+    if level != "crisis":
+        for group_a, group_b in CRISIS_CONTEXT_PAIRS:
+            a_found = [k for k in group_a if k in text]
+            b_found = [k for k in group_b if k in text]
+            if a_found and b_found:
+                detected_keywords.extend(a_found)
+                detected_keywords.extend(b_found)
+                level = "crisis"
+                requires_llm = True  # 복합 문맥은 LLM 검증 권장
+                break
+
+    # Step 2: Warning 키워드 검사 (Crisis가 아닌 경우)
+    if level != "crisis":
+        for keyword in WARNING_KEYWORDS:
+            if keyword in text:
+                detected_keywords.append(keyword)
+                if level != "warning":
+                    level = "warning"
+
+    # LLM 2차 검증 (복합 문맥이 걸렸을 때만)
+    if requires_llm and GROQ_API_KEY:
+        try:
+            llm_result = _verify_crisis_with_llm(text, detected_keywords)
+            if llm_result == "low":
+                level = "warning"  # 일상 표현으로 판단 → 위기에서 주의로 하향
+        except:
+            pass  # LLM 실패 시 보수적으로 crisis 유지
+
+    return {
+        "level": level,
+        "keywords": list(set(detected_keywords)),
+        "requires_llm_check": requires_llm,
+    }
+
+
+def _verify_crisis_with_llm(text: str, keywords: list) -> str:
+    """LLM으로 복합 문맥 2차 검증"""
+    from groq import Groq
+    client = Groq(api_key=GROQ_API_KEY)
+
+    prompt = f"""다음 상담 내용에서 감지된 키워드: {keywords}
+
+상담 내용:
+\"\"\"{text}\"\"\"
+
+이 키워드가 사용된 맥락을 판단해주세요.
+- "crisis": 자살/자해 의도, 신변정리, 마지막 작별 등 위기 상황
+- "low": 일상적인 정리, 일반적인 인사, 단순 비유적 표현
+
+한 단어로만 답하세요: crisis 또는 low"""
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.1,
+        max_tokens=10,
+    )
+    result = response.choices[0].message.content.strip().lower()
+    return "low" if "low" in result else "crisis"
+
+
 def generate_soap_note(text: str) -> dict:
     """상담 일지 텍스트를 SOAP 형식으로 자동 초안 생성"""
     try:

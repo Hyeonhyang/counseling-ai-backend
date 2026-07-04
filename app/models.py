@@ -47,6 +47,9 @@ class Session(Base):
     key_persons = Column(Text, default="[]")  # JSON array
     defense_mechanisms = Column(Text, default="[]")  # JSON array
     ai_summary = Column(Text, default="")
+    # 위기 레벨
+    risk_level = Column(String, default="none")  # none, warning, crisis
+    risk_keywords = Column(Text, default="[]")  # JSON array of detected keywords
     # 상담 기법
     technique_used = Column(String, default="")
     # SOAP 노트

@@ -46,6 +46,8 @@ class SessionUpdateScores(BaseModel):
     soap_objective: str = ""
     soap_assessment: str = ""
     soap_plan: str = ""
+    risk_level: str = "none"
+    risk_keywords: str = "[]"
 
 
 class SessionResponse(BaseModel):
