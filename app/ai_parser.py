@@ -34,6 +34,7 @@ def parse_counseling_text(text: str) -> dict:
     """상담 일지 텍스트를 분석하여 구조화된 데이터 추출"""
     try:
         prompt = f"""다음 상담 일지를 분석하여 아래 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만 출력하세요.
+모든 텍스트 값은 반드시 한국어로 작성하세요. 절대 일본어, 중국어, 영어를 사용하지 마세요.
 
 상담 일지:
 \"\"\"
@@ -46,12 +47,12 @@ def parse_counseling_text(text: str) -> dict:
   "anxiety_score": (0~100 사이 정수, 불안 수준. 10단위 반올림 금지. 예: 44, 71, 28처럼 정밀하게),
   "anger_score": (0~100 사이 정수, 분노 수준. 정밀 평가 필수. 예: 15, 53, 67처럼),
   "self_esteem_score": (0~100 사이 정수, 자존감 수준. 높을수록 자존감 높음. 정밀 평가 필수. 예: 42, 58, 73처럼),
-  "key_persons": ["핵심 언급 인물들"],
-  "defense_mechanisms": ["관찰된 방어기제나 심리 상태"],
-  "summary": "이 회차 상담의 핵심 내용을 2~3문장으로 요약"
+  "key_persons": ["핵심 언급 인물들 - 한국어로"],
+  "defense_mechanisms": ["관찰된 방어기제나 심리 상태 - 한국어로"],
+  "summary": "이 회차 상담의 핵심 내용을 한국어로 2~3문장으로 요약. 반드시 한국어만 사용할 것."
 }}"""
-
         response_text = _call_llm(prompt)
+
 
         # JSON 블록 추출
         if "```json" in response_text:
@@ -104,6 +105,7 @@ def generate_soap_note(text: str) -> dict:
         client = Groq(api_key=GROQ_API_KEY)
 
         prompt = f"""당신은 정신건강 상담 기록 전문가입니다. 다음 상담 내용을 SOAP 형식으로 정리해주세요.
+모든 내용은 반드시 한국어로만 작성하세요. 일본어, 중국어, 영어를 절대 사용하지 마세요.
 
 상담 내용:
 \"\"\"
@@ -113,10 +115,10 @@ def generate_soap_note(text: str) -> dict:
 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만 출력하세요.
 
 {{
-  "subjective": "내담자가 직접 보고한 주관적 호소 내용 (감정, 증상, 생각 등을 내담자의 관점에서 기술. 2~4문장)",
-  "objective": "상담사가 관찰한 객관적 사항 (표정, 태도, 행동, 비언어적 단서, 외모 변화 등. 2~3문장)",
-  "assessment": "상담사의 전문적 평가 (현재 심리 상태 진단적 인상, 위험도 평가, 진전도. 2~3문장)",
-  "plan": "향후 상담 계획 (다음 세션 목표, 과제, 기법 변경 여부, 의뢰 필요성 등. 2~3문장)"
+  "subjective": "내담자가 직접 보고한 주관적 호소 내용. 한국어 2~4문장",
+  "objective": "상담사가 관찰한 객관적 사항. 한국어 2~3문장",
+  "assessment": "상담사의 전문적 평가. 한국어 2~3문장",
+  "plan": "향후 상담 계획. 한국어 2~3문장"
 }}"""
 
         response = client.chat.completions.create(
