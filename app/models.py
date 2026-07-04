@@ -49,6 +49,11 @@ class Session(Base):
     ai_summary = Column(Text, default="")
     # 상담 기법
     technique_used = Column(String, default="")
+    # SOAP 노트
+    soap_subjective = Column(Text, default="")
+    soap_objective = Column(Text, default="")
+    soap_assessment = Column(Text, default="")
+    soap_plan = Column(Text, default="")
     # 타임스탬프
     session_date = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)

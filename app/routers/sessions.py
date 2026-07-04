@@ -109,6 +109,14 @@ def update_scores(session_id: int, data: SessionUpdateScores, db: DBSession = De
     session.defense_mechanisms = data.defense_mechanisms
     if data.ai_summary:
         session.ai_summary = data.ai_summary
+    if data.soap_subjective:
+        session.soap_subjective = data.soap_subjective
+    if data.soap_objective:
+        session.soap_objective = data.soap_objective
+    if data.soap_assessment:
+        session.soap_assessment = data.soap_assessment
+    if data.soap_plan:
+        session.soap_plan = data.soap_plan
     db.commit()
     db.refresh(session)
     return session

@@ -42,6 +42,10 @@ class SessionUpdateScores(BaseModel):
     key_persons: str = "[]"
     defense_mechanisms: str = "[]"
     ai_summary: str = ""
+    soap_subjective: str = ""
+    soap_objective: str = ""
+    soap_assessment: str = ""
+    soap_plan: str = ""
 
 
 class SessionResponse(BaseModel):
@@ -57,6 +61,10 @@ class SessionResponse(BaseModel):
     defense_mechanisms: str
     ai_summary: str
     technique_used: str
+    soap_subjective: str
+    soap_objective: str
+    soap_assessment: str
+    soap_plan: str
     session_date: datetime
     created_at: datetime
 
