@@ -10,6 +10,7 @@ from app.database import engine, SessionLocal
 from app.models import Base
 from app.routers import clients, sessions, rag
 from app.routers.auth import router as auth_router
+from app.routers.stt import router as stt_router
 
 load_dotenv()
 
@@ -64,6 +65,7 @@ app.include_router(auth_router)
 app.include_router(clients.router)
 app.include_router(sessions.router)
 app.include_router(rag.router)
+app.include_router(stt_router)
 
 
 @app.get("/api/health")

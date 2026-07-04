@@ -6,6 +6,9 @@ from app.database import get_db
 from app.models import Session
 from app.schemas import SessionCreate, SessionResponse, SessionUpdateScores, AIParseResult
 from app.ai_parser import parse_counseling_text, generate_comparison_insight, detect_risk_level
+from groq import Groq
+import os
+import tempfile
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -75,6 +78,34 @@ def generate_soap(data: dict):
     if not text.strip():
         raise HTTPException(status_code=400, detail="Text is empty")
     return generate_soap_note(text)
+
+
+@router.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """음성 파일을 텍스트로 변환 (Groq Whisper)"""
+    try:
+        # 임시 파일로 저장
+        suffix = ".webm" if "webm" in (file.content_type or "") else ".wav"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        # Groq Whisper 호출
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        with open(tmp_path, "rb") as audio_file:
+            transcription = client.audio.transcriptions.create(
+                model="whisper-large-v3",
+                file=audio_file,
+                language="ko",
+            )
+
+        # 임시 파일 삭제
+        os.unlink(tmp_path)
+
+        return {"text": transcription.text}
+    except Exception as e:
+        return {"text": "", "error": str(e)}
 
 
 @router.post("/{session_id}/parse", response_model=AIParseResult)
