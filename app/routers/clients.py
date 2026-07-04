@@ -23,8 +23,16 @@ def list_clients(search: str = "", counselor_id: int = Depends(get_current_couns
             Session.client_id == c.id
         ).order_by(Session.session_number.desc()).first()
 
-        client_data = ClientResponse.model_validate(c).model_dump()
-        client_data["latest_risk_level"] = latest_session.risk_level if latest_session and latest_session.risk_level else "none"
+        client_data = {
+            "id": c.id,
+            "name": c.name,
+            "age": c.age,
+            "gender": c.gender,
+            "presenting_issue": c.presenting_issue or "",
+            "notes": c.notes or "",
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "latest_risk_level": latest_session.risk_level if latest_session and latest_session.risk_level else "none",
+        }
         result.append(client_data)
 
     return result
