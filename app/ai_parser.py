@@ -72,12 +72,13 @@ def generate_comparison_insight(sessions_data: list) -> str:
     """다중 세션 비교 인사이트 생성"""
     try:
         sessions_text = json.dumps(sessions_data, ensure_ascii=False, indent=2)
-        prompt = f"""다음은 한 내담자의 여러 회차 상담 데이터입니다. 시간 흐름에 따른 변화를 분석하여 3줄 이내로 핵심 인사이트를 한국어로 작성하세요.
+        prompt = f"""다음은 한 내담자의 여러 회차 상담 데이터입니다. 시간 흐름에 따른 변화를 분석하여 3줄 이내로 핵심 인사이트를 작성하세요.
+반드시 한국어로만 작성하세요. 절대 일본어(한자 포함), 중국어, 영어를 사용하지 마세요. 한글과 숫자만 사용하세요.
 
 데이터:
 {sessions_text}
 
-형식: 변화 추이와 핵심 해석을 담은 전문적이고 간결한 분석 (3줄 이내)"""
+형식: 변화 추이와 핵심 해석을 담은 전문적이고 간결한 분석 (한국어 3줄 이내)"""
 
         return _call_llm(prompt)
 
@@ -255,6 +256,7 @@ def generate_rag_suggestion(current_state: dict, similar_cases: list) -> str:
     """유사 케이스 기반 대안 제안 생성"""
     try:
         prompt = f"""당신은 심리상담 수퍼바이저입니다. 현재 내담자의 상태와 유사한 과거 성공 사례를 바탕으로 대안 기법을 추천하세요.
+반드시 한국어로만 작성하세요. 절대 일본어(한자 포함), 중국어, 영어를 사용하지 마세요.
 
 현재 내담자 상태:
 {json.dumps(current_state, ensure_ascii=False)}
@@ -262,7 +264,7 @@ def generate_rag_suggestion(current_state: dict, similar_cases: list) -> str:
 유사 과거 성공 사례:
 {json.dumps(similar_cases, ensure_ascii=False)}
 
-형식: 구체적인 기법 전환 제안을 3~4문장으로 한국어로 작성하세요. 근거를 포함하세요."""
+형식: 구체적인 기법 전환 제안을 한국어 3~4문장으로 작성하세요. 근거를 포함하세요."""
 
         return _call_llm(prompt)
 
