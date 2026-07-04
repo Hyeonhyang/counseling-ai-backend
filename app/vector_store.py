@@ -139,8 +139,14 @@ def search_similar_sessions(current_session: dict, current_client_id: int, top_k
                 if current_words & other_words:
                     issue_bonus = 10
 
-            total_similarity = min(100, score_similarity + technique_bonus + person_bonus +
-                                   defense_bonus + gender_bonus + age_bonus + issue_bonus)
+            # 종합 유사도 계산 (가중 평균 방식, 100점 만점)
+            # 점수 유사도: 60% 비중
+            # 매칭 보너스: 최대 40% (각 요소 비율 배분)
+            bonus_total = technique_bonus + person_bonus + defense_bonus + gender_bonus + age_bonus + issue_bonus
+            max_bonus = 70  # 모든 보너스 최대합
+            bonus_ratio = bonus_total / max_bonus if max_bonus > 0 else 0
+
+            total_similarity = (score_similarity * 0.6) + (bonus_ratio * 40)
 
             scored.append({
                 "session": s,
