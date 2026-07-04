@@ -43,6 +43,10 @@ def search_similar_sessions(current_session: dict, current_client_id: int, top_k
     1. 점수 유사도 (유클리드 거리)
     2. 기법 매칭 보너스
     3. 핵심 인물 매칭 보너스
+    4. 방어기제 매칭 보너스
+    5. 성별 매칭 보너스
+    6. 나이대 매칭 보너스
+    7. 호소문제 유사 보너스
     """
     db = SessionLocal()
     try:
@@ -56,11 +60,24 @@ def search_similar_sessions(current_session: dict, current_client_id: int, top_k
         technique = current_session.get("technique_used", "")
         persons = current_session.get("key_persons", "[]")
 
+        # 현재 내담자 정보
+        current_client = db.query(Client).filter(Client.id == current_client_id).first()
+        current_gender = current_client.gender if current_client else None
+        current_age = current_client.age if current_client else None
+        current_issue = current_client.presenting_issue if current_client else ""
+
         # 다른 내담자의 분석 완료된 세션만 조회
         all_sessions = db.query(Session).filter(
             Session.client_id != current_client_id,
             Session.depression_score > 0
         ).all()
+
+        # 내담자 정보 캐싱 (성별, 나이 등)
+        client_cache = {}
+        client_ids = set(s.client_id for s in all_sessions)
+        clients = db.query(Client).filter(Client.id.in_(client_ids)).all()
+        for c in clients:
+            client_cache[c.id] = c
 
         scored = []
         for s in all_sessions:
@@ -97,16 +114,46 @@ def search_similar_sessions(current_session: dict, current_client_id: int, top_k
             except:
                 pass
 
-            total_similarity = min(100, score_similarity + technique_bonus + person_bonus + defense_bonus)
+            # 5. 성별 매칭 보너스 (+10)
+            gender_bonus = 0
+            other_client = client_cache.get(s.client_id)
+            if other_client and current_gender:
+                if other_client.gender == current_gender:
+                    gender_bonus = 10
+
+            # 6. 나이대 매칭 보너스 (±5세 이내: +10, ±10세 이내: +5)
+            age_bonus = 0
+            if other_client and current_age and other_client.age:
+                age_diff = abs(current_age - other_client.age)
+                if age_diff <= 5:
+                    age_bonus = 10
+                elif age_diff <= 10:
+                    age_bonus = 5
+
+            # 7. 호소문제 유사 보너스 (같은 키워드 포함 시 +10)
+            issue_bonus = 0
+            if other_client and current_issue and other_client.presenting_issue:
+                # 간단한 키워드 겹침 체크
+                current_words = set(current_issue.replace(",", " ").split())
+                other_words = set(other_client.presenting_issue.replace(",", " ").split())
+                if current_words & other_words:
+                    issue_bonus = 10
+
+            total_similarity = min(100, score_similarity + technique_bonus + person_bonus +
+                                   defense_bonus + gender_bonus + age_bonus + issue_bonus)
 
             scored.append({
                 "session": s,
+                "client": other_client,
                 "similarity": round(total_similarity, 1),
                 "factors": {
                     "score_match": round(score_similarity, 1),
                     "technique_match": technique_bonus > 0,
                     "person_overlap": person_bonus > 0,
                     "defense_overlap": defense_bonus > 0,
+                    "gender_match": gender_bonus > 0,
+                    "age_match": age_bonus > 0,
+                    "issue_match": issue_bonus > 0,
                 }
             })
 
@@ -116,8 +163,14 @@ def search_similar_sessions(current_session: dict, current_client_id: int, top_k
         results = []
         for item in scored[:top_k]:
             s = item["session"]
+            c = item["client"]
+            age_str = f"{c.age}세" if c and c.age else ""
+            gender_str = "남" if c and c.gender == "M" else "여" if c and c.gender == "F" else ""
+            demo = f"({gender_str} {age_str})".strip("()") if (age_str or gender_str) else ""
+
             results.append({
                 "case_id": f"내담자 #{s.client_id}",
+                "demographics": demo,
                 "session_number": s.session_number,
                 "similarity": item["similarity"],
                 "technique_used": s.technique_used or "미기록",
