@@ -63,6 +63,8 @@ class SessionResponse(BaseModel):
     defense_mechanisms: str
     ai_summary: str
     technique_used: str
+    risk_level: str
+    risk_keywords: str
     soap_subjective: str
     soap_objective: str
     soap_assessment: str
