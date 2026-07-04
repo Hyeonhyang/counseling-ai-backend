@@ -11,11 +11,23 @@ router = APIRouter(prefix="/api/clients", tags=["clients"])
 
 @router.get("", response_model=list[ClientResponse])
 def list_clients(search: str = "", counselor_id: int = Depends(get_current_counselor_id), db: DBSession = Depends(get_db)):
-    """내 내담자 목록만 조회"""
+    """내 내담자 목록만 조회 + 최신 위기 레벨"""
     query = db.query(Client).filter(Client.counselor_id == counselor_id)
     if search:
         query = query.filter(Client.name.contains(search))
-    return query.order_by(Client.created_at.desc()).all()
+    clients = query.order_by(Client.created_at.desc()).all()
+
+    result = []
+    for c in clients:
+        latest_session = db.query(Session).filter(
+            Session.client_id == c.id
+        ).order_by(Session.session_number.desc()).first()
+
+        client_data = ClientResponse.model_validate(c).model_dump()
+        client_data["latest_risk_level"] = latest_session.risk_level if latest_session and latest_session.risk_level else "none"
+        result.append(client_data)
+
+    return result
 
 
 @router.get("/{client_id}", response_model=ClientResponse)
