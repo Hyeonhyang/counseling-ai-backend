@@ -64,6 +64,16 @@ def parse_text_only(data: dict):
     )
 
 
+@router.post("/soap")
+def generate_soap(data: dict):
+    """상담 내용을 SOAP 형식으로 변환"""
+    from app.ai_parser import generate_soap_note
+    text = data.get("text", "")
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Text is empty")
+    return generate_soap_note(text)
+
+
 @router.post("/{session_id}/parse", response_model=AIParseResult)
 def parse_session(session_id: int, db: DBSession = Depends(get_db)):
     """AI로 세션 텍스트 분석"""

@@ -97,6 +97,55 @@ def generate_comparison_insight(sessions_data: list) -> str:
         return "AI 인사이트를 생성할 수 없습니다."
 
 
+def generate_soap_note(text: str) -> dict:
+    """상담 일지 텍스트를 SOAP 형식으로 자동 초안 생성"""
+    try:
+        from groq import Groq
+        client = Groq(api_key=GROQ_API_KEY)
+
+        prompt = f"""당신은 정신건강 상담 기록 전문가입니다. 다음 상담 내용을 SOAP 형식으로 정리해주세요.
+
+상담 내용:
+\"\"\"
+{text}
+\"\"\"
+
+반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만 출력하세요.
+
+{{
+  "subjective": "내담자가 직접 보고한 주관적 호소 내용 (감정, 증상, 생각 등을 내담자의 관점에서 기술. 2~4문장)",
+  "objective": "상담사가 관찰한 객관적 사항 (표정, 태도, 행동, 비언어적 단서, 외모 변화 등. 2~3문장)",
+  "assessment": "상담사의 전문적 평가 (현재 심리 상태 진단적 인상, 위험도 평가, 진전도. 2~3문장)",
+  "plan": "향후 상담 계획 (다음 세션 목표, 과제, 기법 변경 여부, 의뢰 필요성 등. 2~3문장)"
+}}"""
+
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=800,
+        )
+        response_text = response.choices[0].message.content.strip()
+
+        # JSON 블록 추출
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0]
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0]
+
+        result = json.loads(response_text.strip())
+        return result
+
+    except Exception as e:
+        print(f"SOAP Generation Error: {e}")
+        return {
+            "subjective": "(AI 생성 실패 - 내담자의 주관적 호소를 여기에 작성해주세요)",
+            "objective": "(AI 생성 실패 - 관찰된 객관적 사항을 여기에 작성해주세요)",
+            "assessment": "(AI 생성 실패 - 전문적 평가를 여기에 작성해주세요)",
+            "plan": "(AI 생성 실패 - 향후 계획을 여기에 작성해주세요)",
+        }
+
+
 def generate_rag_suggestion(current_state: dict, similar_cases: list) -> str:
     """유사 케이스 기반 대안 제안 생성"""
     try:
